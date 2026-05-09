@@ -39,9 +39,15 @@ body{background:var(--bg);color:var(--txt);font-family:'Noto Sans TC',sans-serif
 .hdr-title{font-size:13px;font-weight:700}
 .hdr-sub{font-size:10px;color:var(--muted)}
 .hdr-sp{flex:1}
-.sync-badge{font-size:10px;padding:3px 9px;background:var(--surface2);border:1px solid var(--border);
-  border-radius:12px;white-space:nowrap;color:var(--muted)}
-.sync-badge.on{color:var(--accent);border-color:var(--al)}
+.sync-badge{display:flex;align-items:center;gap:6px;padding:4px 10px;border-radius:16px;border:1px solid var(--border);font-size:11px;cursor:pointer;transition:all .2s;background:var(--surface2);white-space:nowrap}
+.sync-badge:hover{border-color:var(--accent)}
+.sync-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;transition:background .3s}
+.sync-dot.red{background:#ef4444}.sync-dot.yellow{background:#f59e0b;animation:pulse-y 1.5s infinite}
+.sync-dot.green{background:#16a34a}.sync-dot.blue{background:#3b82f6;animation:pulse-b .8s infinite}
+@keyframes pulse-y{0%,100%{opacity:1}50%{opacity:.4}}
+@keyframes pulse-b{0%,100%{opacity:1}50%{opacity:.5}}
+.sync-text{font-size:10px;color:var(--txt2);line-height:1.2}
+.sync-time{font-size:9px;color:var(--muted)}
 .lang-grp{display:flex;gap:3px}
 .lb{padding:3px 8px;border:1px solid var(--border);border-radius:5px;background:transparent;
   cursor:pointer;font-size:11px;font-weight:600;color:var(--txt2);transition:all .15s}
@@ -313,7 +319,13 @@ hr.sep{border:none;border-top:1px dashed var(--border-light);margin:8px 0}
     <div class="hdr-sub" id="hs">Vantage River Textiles · 2026</div>
   </div>
   <div class="hdr-sp"></div>
-  <span class="sync-badge" id="sync-b">💾 本地模式</span>
+  <div class="sync-badge" id="sync-b" onclick="goTab('settings')" title="點擊進入設定">
+    <span class="sync-dot red" id="sync-dot"></span>
+    <div>
+      <div class="sync-text" id="sync-text">本地模式</div>
+      <div class="sync-time" id="sync-time"></div>
+    </div>
+  </div>
   <div class="lang-grp">
     <button class="lb on" onclick="setLang('zh')">中文</button>
     <button class="lb" onclick="setLang('en')">EN</button>
@@ -388,11 +400,6 @@ hr.sep{border:none;border-top:1px dashed var(--border-light);margin:8px 0}
     </div>
     <div id="r-empty" style="display:none;text-align:center;padding:36px;color:var(--muted)">
       <div style="font-size:28px;margin-bottom:6px">📝</div><div id="r-empty-msg">本月尚無培訓記錄</div>
-      <div id="r-cloud-hint" style="display:none;margin-top:14px;padding:12px 16px;background:var(--sp-bg);border:1px solid #bfdbfe;border-radius:8px;text-align:left;max-width:440px;margin-left:auto;margin-right:auto">
-        <div style="font-size:12px;font-weight:700;color:var(--sp);margin-bottom:6px">☁️ 資料可能儲存在 GAS 雲端</div>
-        <div style="font-size:11px;color:var(--txt2);margin-bottom:10px">如果你在其他裝置輸入過記錄，或清除過瀏覽器快取，可從 GAS 下載最新資料。</div>
-        <button class="btn btn-p" style="font-size:12px" onclick="syncFromGAS()">⬇ 從 GAS 下載資料</button>
-      </div>
     </div>
   </div>
 
@@ -507,7 +514,7 @@ hr.sep{border:none;border-top:1px dashed var(--border-light);margin:8px 0}
     <div class="set-row">
       <label>GAS Web App URL</label>
       <input type="url" id="gas-url" placeholder="https://script.google.com/macros/s/..." style="flex:1;max-width:500px" oninput="saveGasUrl()">
-      <span id="conn-status" class="conn-na">未設定</span>
+      <span id="conn-status" class="conn-na" data-i18n="conn.na">未設定</span>
     </div>
     <div class="set-row" style="gap:7px;flex-wrap:wrap">
       <button class="btn btn-p" onclick="syncToGAS()" data-i18n="set.sync.upload">⬆ 上傳至 GAS</button>
@@ -1137,7 +1144,11 @@ function save(){
     localStorage.setItem('vrt3_rc',JSON.stringify(S.records));
     localStorage.setItem('vrt3_lb',JSON.stringify(S.library));
     localStorage.setItem('vrt3_opts',JSON.stringify(S.opts));
+    // Mark as needing sync whenever local data changes
+    const {gasUrl}=getCfg();
+    if(gasUrl) setCfg({needsSync:true});
     updStorInfo();
+    updSyncBadge();
   }catch(e){toast('儲存失敗','err');}
 }
 function load(){
@@ -1158,16 +1169,37 @@ function getCfg(){try{return JSON.parse(localStorage.getItem('vrt3_cfg')||'{}')}
 function setCfg(o){localStorage.setItem('vrt3_cfg',JSON.stringify({...getCfg(),...o}))}
 function saveGasUrl(){const u=gv('gas-url').trim();setCfg({gasUrl:u});updSyncBadge();}
 function updSyncBadge(){
-  const {gasUrl,lastSync}=getCfg();
-  const b=document.getElementById('sync-b');
+  const {gasUrl,lastSync,needsSync}=getCfg();
+  const dot=document.getElementById('sync-dot');
+  const txt=document.getElementById('sync-text');
+  const tim=document.getElementById('sync-time');
   const cs=document.getElementById('conn-status');
   const ls=document.getElementById('last-sync');
-  if(gasUrl){
-    b.textContent=str('sync.connected');b.className='sync-badge on';
-    if(cs){cs.textContent=str('conn.set');cs.className='conn-ok';}
-  }else{
-    b.textContent=str('sync.local');b.className='sync-badge';
-    if(cs){cs.textContent=str('conn.na');cs.className='conn-na';}
+  if(!dot) return;
+  if(!gasUrl){
+    dot.className='sync-dot red';
+    txt.textContent=LANG==='en'?'Local only':'本地模式';
+    if(tim) tim.textContent=LANG==='en'?'No GAS configured':'未設定 GAS';
+    if(cs){cs.textContent=LANG==='en'?'Not Set':'未設定';cs.className='conn-na';}
+    if(ls) ls.textContent=str('last.sync')+str('never.sync');
+    return;
+  }
+  if(cs){cs.textContent=LANG==='en'?'Connected':'已設定';cs.className='conn-ok';}
+  if(needsSync){
+    dot.className='sync-dot yellow';
+    txt.textContent=LANG==='en'?'Needs sync':'有未同步資料';
+    if(tim) tim.textContent=lastSync?(LANG==='en'?'Last: ':'上次: ')+lastSync:'';
+  } else if(lastSync){
+    const syncDate=new Date(lastSync.replace(/\//g,'-'));
+    const diffMin=isNaN(syncDate)?999:Math.round((Date.now()-syncDate.getTime())/60000);
+    const fresh=diffMin<120;
+    dot.className=fresh?'sync-dot green':'sync-dot yellow';
+    txt.textContent=fresh?(LANG==='en'?'Synced ✓':'已同步 ✓'):(LANG==='en'?'Re-sync recommended':'建議重新同步');
+    if(tim) tim.textContent=(LANG==='en'?'':'上次 ')+lastSync;
+  } else {
+    dot.className='sync-dot yellow';
+    txt.textContent=LANG==='en'?'Not synced yet':'尚未同步';
+    if(tim) tim.textContent=LANG==='en'?'Click ⬆ to upload':'點 ⬆ 上傳';
   }
   if(ls) ls.textContent=str('last.sync')+(lastSync||str('never.sync'));
 }
@@ -1332,14 +1364,7 @@ function renderRecords(){
   const bd=document.getElementById('rbd');
   const emp=document.getElementById('r-empty');
   document.getElementById('r-empty-msg').textContent=LANG==='en'?'No training records for this month.':'本月尚無培訓記錄';
-  if(!recs.length){
-    bd.innerHTML='';
-    emp.style.display='block';
-    // Show cloud hint if GAS is configured
-    const cloudHint=document.getElementById('r-cloud-hint');
-    if(cloudHint) cloudHint.style.display=getCfg().gasUrl?'block':'none';
-    return;
-  }
+  if(!recs.length){bd.innerHTML='';emp.style.display='block';return;}
   emp.style.display='none';
   bd.innerHTML=recs.map((r,i)=>{
     const att=r.attendees||0,abs=r.absences||0;
@@ -1567,10 +1592,9 @@ function renderSettings(){
   document.getElementById('gas-url').value=gasUrl;
   if(document.getElementById('tg-token')) document.getElementById('tg-token').value=tgToken;
   if(document.getElementById('tg-chatid')) document.getElementById('tg-chatid').value=tgChatId;
-  updStorInfo();
+  updSyncBadge();updStorInfo();
   document.getElementById('gas-code').textContent=GAS_CODE;
   applyI18n();
-  updSyncBadge(); // must run AFTER applyI18n so conn-status text isn't overwritten
 }
 function saveTgCfg(){
   const token=(document.getElementById('tg-token')||{}).value||'';
@@ -1816,6 +1840,7 @@ function cfmReset(){
 // =====================================================
 function openImport(target){
   S.impTarget=target;S.impRows=[];
+  S.xlsxWorkbook=null;S.xlsxMonthSheets=[];S.xlsxMatrixSheets=[];
   document.getElementById('imp-ttl').textContent=target==='matrix'?str('imp.ttl.matrix'):`${str('imp.ttl.monthly')} (${months()[S.month-1]})`;
   document.getElementById('imp-file').value='';
   document.getElementById('imp-info').style.display='none';
@@ -1846,18 +1871,210 @@ function parseCSV(txt){
   S.impRows=lines.slice(1).map(l=>{const cols=l.split(',').map(v=>v.replace(/^"|"$/g,'').trim());const o={};hdr.forEach((h,i)=>o[h]=cols[i]||'');return o;}).filter(r=>Object.values(r).some(v=>v));
   showImpPreview(hdr,S.impRows);
 }
+// ── VRT Excel format constants ─────────────────────────────────
+// Month sheet column indices (0-based): No./Subject/Dept/Trainer/Date/Time/Duration/Participant/Attendees/Absence/Rate
+const VRT_MON_COL={no:0,subj:1,dept:2,trainer:3,date:4,time:5,dur:6,part:7,att:8,abs:9,rate:10};
+const MONTH_NAMES=['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+const MONTH_ZH=['一月','二月','三月','四月','五月','六月','七月','八月','九月','十月','十一月','十二月'];
+
+function normCell(c){return String(c||'').replace(/[\r\n]+/g,' ').replace(/\s+/g,' ').trim().toLowerCase();}
+
+// Detect sheet month from name (Jan=1, Feb=2, etc.)
+function sheetNameToMonth(name){
+  const n=name.toLowerCase().trim();
+  const i=MONTH_NAMES.findIndex(m=>n.startsWith(m)||n===m);
+  if(i>=0) return i+1;
+  const iz=MONTH_ZH.findIndex(m=>n.includes(m));
+  if(iz>=0) return iz+1;
+  // Try number like "04" or "4月"
+  const nm=n.match(/^(\d{1,2})月?$/);
+  if(nm) return parseInt(nm[1]);
+  return null;
+}
+
+// Find where data rows start (skip title/header rows)
+function findDataStart(rows){
+  for(let r=0;r<Math.min(rows.length,10);r++){
+    const row=rows[r]||[];
+    // Data row: col 0 is a number (No.)
+    const v=String(row[0]||'').trim();
+    if(/^\d+$/.test(v)&&parseInt(v)>=1&&parseInt(v)<=200) return r;
+  }
+  return 4; // fallback
+}
+
+// Parse a VRT monthly sheet (rows = array of arrays from sheet_to_json header:1)
+function parseVrtMonthSheet(rows, monthNum){
+  const dataStart=findDataStart(rows);
+  const records=[];
+  for(let r=dataStart;r<rows.length;r++){
+    const row=rows[r]||[];
+    const no=String(row[VRT_MON_COL.no]||'').trim();
+    const subj=String(row[VRT_MON_COL.subj]||'').trim();
+    if(!subj||!no) continue;
+    // Format date: might be Excel serial or ISO string
+    let date='';
+    const rawDate=row[VRT_MON_COL.date];
+    if(rawDate){
+      if(rawDate instanceof Date){
+        date=rawDate.toISOString().split('T')[0];
+      }else if(typeof rawDate==='number'){
+        // Excel serial date
+        const d=new Date(Math.round((rawDate-25569)*86400*1000));
+        date=d.toISOString().split('T')[0];
+      }else{
+        const s=String(rawDate).trim();
+        // "2026-01-05 00:00:00" or "2026/01/05"
+        const dm=s.match(/(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
+        date=dm?`${dm[1]}-${dm[2].padStart(2,'0')}-${dm[3].padStart(2,'0')}`:s.split(' ')[0];
+      }
+    }
+    const att=parseInt(row[VRT_MON_COL.att]||0)||0;
+    const abs=parseInt(row[VRT_MON_COL.abs]||0)||0;
+    records.push({
+      id:'vrt'+Date.now()+Math.random().toString(36).slice(2,5),
+      seq:parseInt(no)||records.length+1,
+      subject:subj,
+      dept:String(row[VRT_MON_COL.dept]||'').trim(),
+      trainer:String(row[VRT_MON_COL.trainer]||'').trim(),
+      date, time:String(row[VRT_MON_COL.time]||'').trim(),
+      duration:String(row[VRT_MON_COL.dur]||'').trim(),
+      participant:String(row[VRT_MON_COL.part]||'').trim(),
+      attendees:att, absences:abs, remarks:''
+    });
+  }
+  return records;
+}
+
+// Parse VRT Training Matrix sheet → trainings array
+function parseVrtMatrixSheet(rows){
+  // Find data start: look for row where col 1 is a category word (Safety/HR/etc)
+  const CATS=['safety','hr','health','admin','audit','environment'];
+  let dataStart=5;
+  for(let r=2;r<Math.min(rows.length,15);r++){
+    const c1=String(rows[r]?.[1]||rows[r]?.[0]||'').toLowerCase().trim();
+    if(CATS.some(c=>c1.startsWith(c))){dataStart=r;break;}
+  }
+  // Month columns: find by looking at header row for Jan/Feb...
+  // In VRT format: cols 10-21 = Jan-Dec (0-based)
+  const MON_START=10;
+  const trainings=[];
+  let lastCat='Admin';
+  for(let r=dataStart;r<rows.length;r++){
+    const row=rows[r]||[];
+    if(!row.some(v=>v!==''&&v!==null&&v!==undefined)) continue;
+    // Category from col 1 (may be empty = same as previous)
+    const catRaw=String(row[1]||'').trim();
+    if(catRaw) lastCat=catRaw.charAt(0).toUpperCase()+catRaw.slice(1).toLowerCase();
+    const CAT_MAP={safety:'Safety',hr:'HR',health:'Health',admin:'Admin',audit:'Audit',environment:'Environment'};
+    const category=CAT_MAP[lastCat.toLowerCase()]||lastCat||'Admin';
+    // Training name from col 3
+    const rawName=String(row[3]||'').trim();
+    if(!rawName) continue;
+    // Extract Chinese name (inside parentheses) and English name
+    const parenMatch=rawName.match(/^(.+?)\s*[（(](.+?)[)）]\s*$/);
+    let nameEN=rawName, nameZH=rawName;
+    if(parenMatch){
+      // Check which is Chinese
+      if(/[\u4e00-\u9fff]/.test(parenMatch[1])){nameZH=parenMatch[1];nameEN=parenMatch[2];}
+      else{nameEN=parenMatch[1];nameZH=parenMatch[2];}
+    }else if(/[\u4e00-\u9fff]/.test(rawName)){nameZH=rawName;nameEN='';}
+    // Months: cols 10-21
+    const months={};
+    MK.forEach((m,i)=>{
+      const v=row[MON_START+i];
+      const n=parseInt(v);
+      months[m]=(v!==''&&v!==null&&!isNaN(n)&&n>=1&&n<=4)?n:0;
+    });
+    const trainer=String(row[6]||'').replace(/\n/g,' ').trim();
+    const hours=parseFloat(String(row[7]||'').trim())||1;
+    const traineeEN=String(row[8]||'').replace(/\n/g,' ').trim();
+    const freq=String(row[9]||'').trim();
+    const remarks=String(row[22]||'').trim();
+    trainings.push({
+      id:Math.max(0,...S.trainings.map(t=>t.id))+trainings.length+1,
+      category,nameZH,nameEN,nameKH:'',trainer,hours,
+      traineeZH:traineeEN,traineeEN,traineeKH:'',frequency:freq,months,
+      remarks,type:'internal',organizer:'',outlineZH:'',outlineEN:''
+    });
+  }
+  return trainings;
+}
+
+// Main parser — handles VRT multi-sheet Excel
 function parseXlsx(buf){
   if(typeof XLSX==='undefined'){toast('Excel解析器未載入，請使用CSV','warn');return;}
   try{
-    const wb=XLSX.read(buf,{type:'array'});
-    const ws=wb.Sheets[wb.SheetNames[0]];
-    const json=XLSX.utils.sheet_to_json(ws,{header:1,defval:''});
-    let hi=0;for(let i=0;i<Math.min(json.length,10);i++){if(json[i].filter(v=>String(v).trim()).length>=4){hi=i;break;}}
-    const hdr=json[hi].map(h=>String(h).trim());
-    S.impRows=json.slice(hi+1).map(row=>{const o={};hdr.forEach((h,i)=>o[h]=String(row[i]||'').trim());return o;}).filter(r=>Object.values(r).some(v=>v&&v!=='0'));
-    showImpPreview(hdr,S.impRows);
-  }catch(e){toast('Excel解析失敗：'+e.message,'err');}
+    const wb=XLSX.read(buf,{type:'array',cellDates:true});
+    const sheetNames=wb.SheetNames;
+
+    // Classify sheets
+    const monthSheets=[], matrixSheet=[], unknownSheets=[];
+    sheetNames.forEach(name=>{
+      const mn=sheetNameToMonth(name);
+      if(mn) monthSheets.push({name,month:mn});
+      else if(/matrix|plan|計劃|training/i.test(name)) matrixSheet.push(name);
+      else if(/list|library|庫/i.test(name)) {} // skip
+      else unknownSheets.push(name);
+    });
+
+    // Build sheet selector options for the import modal
+    S.xlsxWorkbook=wb;
+    S.xlsxMonthSheets=monthSheets;
+    S.xlsxMatrixSheets=matrixSheet;
+
+    // Update UI to show sheet choices
+    showXlsxSheetSelector(sheetNames, monthSheets, matrixSheet);
+
+  }catch(e){toast('Excel解析失敗：'+e.message,'err');console.error(e);}
 }
+
+function showXlsxSheetSelector(allSheets, monthSheets, matrixSheets){
+  const prev=document.getElementById('imp-preview');
+  const info=document.getElementById('imp-info');
+  const msg=document.getElementById('imp-msg');
+  const cfmBtn=document.getElementById('btn-cfm-imp');
+  info.style.display='';
+  info.innerHTML=`偵測到 <strong>${allSheets.length}</strong> 個工作表`;
+  // Build sheet list UI
+  let html=`<div style="padding:10px;font-size:12px">`;
+  if(monthSheets.length>0){
+    html+=`<div style="font-weight:700;color:var(--accent);margin-bottom:6px">📝 月份記錄 (${monthSheets.length} 個)</div>`;
+    monthSheets.forEach(s=>{
+      const checked=s.month===S.month?'checked':'';
+      html+=`<label style="display:flex;align-items:center;gap:8px;padding:4px 0;cursor:pointer">
+        <input type="checkbox" class="sheet-cb" data-type="monthly" data-name="${s.name}" data-month="${s.month}" ${checked} style="width:auto">
+        <span>${s.name}</span><span style="color:var(--muted);font-size:10px">→ ${MONTHS_ZH_ARR[s.month-1]}月份記錄</span>
+      </label>`;
+    });
+  }
+  if(matrixSheets.length>0){
+    html+=`<div style="font-weight:700;color:var(--accent);margin:10px 0 6px">📋 年度計劃</div>`;
+    matrixSheets.forEach(s=>{
+      html+=`<label style="display:flex;align-items:center;gap:8px;padding:4px 0;cursor:pointer">
+        <input type="checkbox" class="sheet-cb" data-type="matrix" data-name="${s}" style="width:auto">
+        <span>${s}</span><span style="color:var(--muted);font-size:10px">→ 年度培訓計劃</span>
+      </label>`;
+    });
+  }
+  if(monthSheets.length===0&&matrixSheets.length===0){
+    // Unknown format — show raw sheet list
+    allSheets.forEach(s=>{
+      html+=`<label style="display:flex;align-items:center;gap:8px;padding:4px 0;cursor:pointer">
+        <input type="checkbox" class="sheet-cb" data-type="raw" data-name="${s}" style="width:auto">
+        <span>${s}</span>
+      </label>`;
+    });
+  }
+  html+=`</div>`;
+  prev.innerHTML=html;
+  prev.style.display='';
+  cfmBtn.style.display='inline-flex';
+  cfmBtn.textContent='匯入所選工作表';
+  msg.textContent='請確認要匯入的工作表，然後點擊「匯入所選工作表」';
+}
+
+const MONTHS_ZH_ARR=['1','2','3','4','5','6','7','8','9','10','11','12'];
 function showImpPreview(hdr,rows){
   if(!rows.length){document.getElementById('imp-msg').textContent='⚠ 未偵測到有效資料行';return;}
   const info=document.getElementById('imp-info');info.style.display='';
@@ -1869,7 +2086,82 @@ function showImpPreview(hdr,rows){
   document.getElementById('imp-msg').textContent=`${LANG==='en'?'Showing':'預覽'} ${Math.min(rows.length,8)} ${LANG==='en'?'of':'/'} ${rows.length} ${LANG==='en'?'rows':'行'}`;
 }
 function confirmImport(){
-  if(!S.impRows.length){toast(LANG==='en'?'No data to import':'無資料可匯入','warn');return;}
+  // Check if we have an xlsx workbook with sheet checkboxes
+  const cbs=document.querySelectorAll('.sheet-cb:checked');
+  if(cbs.length>0&&S.xlsxWorkbook){
+    // VRT multi-sheet import
+    let totalAdded=0, monthsImported=[], matrixImported=false;
+    cbs.forEach(cb=>{
+      const sheetName=cb.dataset.name;
+      const type=cb.dataset.type;
+      const ws=S.xlsxWorkbook.Sheets[sheetName];
+      if(!ws) return;
+      const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:'',raw:false,dateNF:'YYYY-MM-DD'});
+      if(type==='monthly'){
+        const monthNum=parseInt(cb.dataset.month)||S.month;
+        const records=parseVrtMonthSheet(rows,monthNum);
+        if(records.length>0){
+          const key=`${CURRENT_YEAR}-${String(monthNum).padStart(2,'0')}`;
+          if(!S.records[key]) S.records[key]=[];
+          // Avoid duplicates: skip records with same subject+date+trainer
+          let added=0;
+          records.forEach(r=>{
+            const dup=S.records[key].some(x=>x.subject===r.subject&&x.date===r.date&&x.trainer===r.trainer);
+            if(!dup){S.records[key].push(r);added++;}
+          });
+          totalAdded+=added;
+          if(added>0) monthsImported.push(`${monthNum}月(+${added})`);
+        }
+      } else if(type==='matrix'){
+        const trainings=parseVrtMatrixSheet(rows);
+        if(trainings.length>0){
+          // Avoid duplicates by nameZH
+          let added=0;
+          trainings.forEach(t=>{
+            const dup=S.trainings.some(x=>x.nameZH===t.nameZH);
+            if(!dup){S.trainings.push(t);added++;}
+            else{
+              // Update months for existing
+              const existing=S.trainings.find(x=>x.nameZH===t.nameZH);
+              if(existing) existing.months={...t.months};
+            }
+          });
+          matrixImported=true;
+          totalAdded+=trainings.length;
+        }
+      } else {
+        // Raw/unknown sheet — try generic column-name import
+        const hi=findDataStart(rows);
+        const hdr=(rows[Math.max(0,hi-1)]||[]).map(h=>String(h).replace(/\n/g,' ').trim());
+        const dataRows=rows.slice(hi).map(row=>{
+          const o={};hdr.forEach((h,i)=>o[h]=String(row[i]||'').trim());return o;
+        }).filter(r=>Object.values(r).some(v=>v&&v!=='0'));
+        S.impRows=dataRows;
+        if(S.impTarget==='monthly') impMonthly(dataRows);
+        else impMatrix(dataRows);
+      }
+    });
+    save();
+    // Mark as needs sync
+    setCfg({needsSync:true});
+    updSyncBadge();
+    const msg=[];
+    if(monthsImported.length) msg.push(`月份記錄 ${monthsImported.join(', ')}`);
+    if(matrixImported) msg.push('年度計劃已更新');
+    toast(`✓ 匯入完成：${msg.join('；') || totalAdded+' 筆'}`, 'ok');
+    closeOv('ov-imp');
+    // Auto-sync to GAS if configured
+    const {gasUrl}=getCfg();
+    if(gasUrl&&totalAdded>0){
+      setTimeout(()=>{
+        if(confirm('匯入成功！是否立即同步到 GAS 雲端？')){syncToGAS();}
+      },400);
+    }
+    renderActive();
+    return;
+  }
+  // Fallback: CSV rows
+  if(!S.impRows||!S.impRows.length){toast(LANG==='en'?'No data to import':'無資料可匯入','warn');return;}
   if(S.impTarget==='monthly') impMonthly(S.impRows);
   else impMatrix(S.impRows);
   closeOv('ov-imp');
@@ -1891,7 +2183,11 @@ function impMonthly(rows){
       absences:parseInt(r['Absences']||r['缺席人數']||0)||0,
       remarks:r['Remarks']||r['備註']||''});added++;
   });
-  save();toast(`${LANG==='en'?'Imported':'已匯入'} ${added} ${LANG==='en'?'records':'筆記錄'}`,'ok');renderRecords();renderPills();
+  save();
+  setCfg({needsSync:true});
+  toast(`${LANG==='en'?'Imported':'已匯入'} ${added} ${LANG==='en'?'records':'筆記錄'}`,'ok');
+  renderRecords();renderPills();
+  _offerAutoSync(added);
 }
 function impMatrix(rows){
   let added=0;
@@ -1905,7 +2201,21 @@ function impMatrix(rows){
       frequency:r['Frequency']||r['頻率']||'1 time',months,
       remarks:r['Remarks']||r['備註']||'',type:'internal',organizer:'',outlineZH:'',outlineEN:''});added++;
   });
-  save();toast(`${LANG==='en'?'Imported':'已匯入'} ${added} ${LANG==='en'?'trainings':'個培訓項目'}`,'ok');renderMatrix();
+  save();
+  setCfg({needsSync:true});
+  toast(`${LANG==='en'?'Imported':'已匯入'} ${added} ${LANG==='en'?'trainings':'個培訓項目'}`,'ok');
+  renderMatrix();
+  _offerAutoSync(added);
+}
+function _offerAutoSync(count){
+  if(!count) return;
+  const {gasUrl}=getCfg();
+  if(!gasUrl) return;
+  setTimeout(()=>{
+    if(confirm(LANG==='en'
+      ?`Import successful (${count} items). Sync to GAS cloud now?`
+      :`匯入成功（${count} 筆）。是否立即同步到 GAS 雲端？`)) syncToGAS();
+  },500);
 }
 function downloadTmpl(type){
   const rows=type==='monthly'
@@ -1958,37 +2268,51 @@ function doPrint(target){
 // =====================================================
 async function syncToGAS(){
   const {gasUrl}=getCfg();if(!gasUrl){toast('請先設定 GAS URL','err');return;}
+  const dot=document.getElementById('sync-dot'),txt=document.getElementById('sync-text');
+  if(dot){dot.className='sync-dot blue';}
+  if(txt){txt.textContent=LANG==='en'?'Uploading…':'上傳中…';}
   loading(true);
   try{
-    const res=await fetch(gasUrl,{method:'POST',body:JSON.stringify({action:'saveAll',trainings:S.trainings,records:S.records,library:S.library}),headers:{'Content-Type':'text/plain'}});
+    const payload={action:'saveAll',trainings:S.trainings,records:S.records,library:S.library};
+    const res=await fetch(gasUrl,{method:'POST',body:JSON.stringify(payload),headers:{'Content-Type':'text/plain'}});
     const d=await res.json();
-    if(d.status==='ok'){const ts=new Date().toLocaleString('zh-TW',{hour12:false}).slice(0,16);setCfg({lastSync:ts});toast('上傳成功 ✓','ok');}
-    else toast('上傳失敗：'+(d.msg||''),'err');
+    if(d.status==='ok'){
+      const ts=new Date().toLocaleString('zh-TW',{hour12:false}).slice(0,16);
+      setCfg({lastSync:ts,needsSync:false});
+      const rc=Object.values(S.records).reduce((a,b)=>a+b.length,0);
+      toast(LANG==='en'
+        ?`Uploaded ✓  ${S.trainings.length} trainings · ${rc} records`
+        :`上傳成功 ✓  培訓 ${S.trainings.length} 項 · 記錄 ${rc} 筆`,'ok');
+    }else{toast('上傳失敗：'+(d.msg||d.error||'unknown'),'err');}
   }catch(e){toast('連線失敗：'+e.message,'err');}
   loading(false);updSyncBadge();
 }
 async function syncFromGAS(){
   const {gasUrl}=getCfg();if(!gasUrl){toast('請先設定 GAS URL','err');return;}
+  const dot=document.getElementById('sync-dot'),txt=document.getElementById('sync-text');
+  if(dot){dot.className='sync-dot blue';}
+  if(txt){txt.textContent=LANG==='en'?'Downloading…':'下載中…';}
   loading(true);
   try{
-    const res=await fetch(gasUrl+'?action=getAll');const d=await res.json();
+    const res=await fetch(gasUrl+'?action=getAll');
+    const d=await res.json();
     if(d.error) throw new Error(d.error);
-    const prevTrCount=S.trainings.length;
-    const prevRecCount=Object.values(S.records).reduce((a,b)=>a+b.length,0);
     if(d.trainings) S.trainings=d.trainings;
     if(d.records) S.records=d.records;
     if(d.library) S.library=d.library;
-    save();
-    const ts=new Date().toLocaleString('zh-TW',{hour12:false}).slice(0,16);setCfg({lastSync:ts});
-    const newTrCount=S.trainings.length;
-    const newRecCount=Object.values(S.records).reduce((a,b)=>a+b.length,0);
-    const msg=LANG==='en'
-      ?`Downloaded ✓ — ${newTrCount} trainings, ${newRecCount} records`
-      :`下載成功 ✓ — 培訓項目 ${newTrCount} 個，月份記錄 ${newRecCount} 筆`;
-    toast(msg,'ok');
+    const rc=Object.values(S.records).reduce((a,b)=>a+b.length,0);
+    // Save without triggering needsSync (just downloaded)
+    localStorage.setItem('vrt3_tr',JSON.stringify(S.trainings));
+    localStorage.setItem('vrt3_rc',JSON.stringify(S.records));
+    localStorage.setItem('vrt3_lb',JSON.stringify(S.library));
+    const ts=new Date().toLocaleString('zh-TW',{hour12:false}).slice(0,16);
+    setCfg({lastSync:ts,needsSync:false});
+    toast(LANG==='en'
+      ?`Downloaded ✓  ${S.trainings.length} trainings · ${rc} records`
+      :`下載成功 ✓  培訓 ${S.trainings.length} 項 · 記錄 ${rc} 筆`,'ok');
     renderActive();
   }catch(e){toast('連線失敗：'+e.message,'err');}
-  loading(false);updSyncBadge();
+  loading(false);updSyncBadge();updStorInfo();
 }
 async function testGAS(){
   const {gasUrl}=getCfg();if(!gasUrl){toast('請先填入 GAS URL','err');return;}
@@ -2039,11 +2363,10 @@ function sendTgSummary(){
     else if(s===3||s===4) cancelledItems.push(tr);
     else pendingItems.push(tr);
   });
-  // Build summary payload
-  const summaryPayload={
+  const payload={
     action:'sendSummary',
     month:key,
-    monthLabel:`${MONTHS_EN[m-1]} ${CURRENT_YEAR}`,
+    monthLabel:`${MONTHS_EN[m-1]} 2026`,
     totalPlanned:planned.length,
     doneCount:doneItems.length,
     pendingCount:pendingItems.length,
@@ -2053,32 +2376,10 @@ function sendTgSummary(){
     pendingItems:pendingItems.map(t=>t.nameZH+(t.nameEN?' / '+t.nameEN:'')),
     cancelledItems:cancelledItems.map(t=>t.nameZH+(t.nameEN?' / '+t.nameEN:''))
   };
-  // Also include full records for this month so GAS always has current data
-  summaryPayload.monthRecords=recs;
-  summaryPayload.trainings=S.trainings; // include matrix status
-
   loading(true);
-  // Step 1: First do a full saveAll so GAS has complete records
-  const savePayload={action:'saveAll',trainings:S.trainings,records:S.records,library:S.library};
-  fetch(gasUrl,{method:'POST',body:JSON.stringify(savePayload),headers:{'Content-Type':'text/plain'}})
+  fetch(gasUrl,{method:'POST',body:JSON.stringify(payload),headers:{'Content-Type':'text/plain'}})
     .then(r=>r.json())
-    .then(saveResult=>{
-      // Update last sync time
-      const ts=new Date().toLocaleString('zh-TW',{hour12:false}).slice(0,16);
-      setCfg({lastSync:ts});
-      // Step 2: Then send the Telegram summary
-      return fetch(gasUrl,{method:'POST',body:JSON.stringify(summaryPayload),headers:{'Content-Type':'text/plain'}});
-    })
-    .then(r=>r.json())
-    .then(d=>{
-      loading(false);
-      updSyncBadge();
-      if(d.status==='ok'){
-        toast(str('toast.tg.ok'),'ok');
-      }else{
-        toast(str('toast.tg.err')+(d.msg||d.error||''),'err');
-      }
-    })
+    .then(d=>{loading(false);if(d.status==='ok') toast(str('toast.tg.ok'),'ok');else toast(str('toast.tg.err')+(d.msg||d.error||''),'err');})
     .catch(e=>{loading(false);toast(str('toast.tg.err')+e.message,'err');});
 }
 
