@@ -2216,10 +2216,22 @@ async function syncFromGAS(){
     if(d.error) throw new Error(d.error);
     // Trainings: take remote if non-empty
     if(d.trainings&&d.trainings.length>0) S.trainings=d.trainings;
-    // Records: MERGE remote into local (never overwrite, only add missing)
+    // Records: MERGE with month-key normalisation (fixes Sheets date-format bug)
     if(d.records){
-      Object.keys(d.records).forEach(monthKey=>{
-        const remote=d.records[monthKey]||[];
+      const normKey=k=>{
+        if(!k) return null;
+        const s=String(k).trim();
+        if(/^\d{4}-\d{2}$/.test(s)) return s;          // already "2026-03"
+        const zp=s.match(/^(\d{4})-(\d)$/);
+        if(zp) return `${zp[1]}-0${zp[2]}`;            // "2026-3" → "2026-03"
+        const dt=s.match(/(\d{4})[^\d](\d{1,2})/);
+        if(dt) return `${dt[1]}-${dt[2].padStart(2,'0')}`; // date string fallback
+        return null;
+      };
+      Object.keys(d.records).forEach(rawKey=>{
+        const monthKey=normKey(rawKey);
+        if(!monthKey) return;
+        const remote=d.records[rawKey]||[];
         if(!S.records[monthKey]) S.records[monthKey]=[];
         remote.forEach(r=>{
           const exists=S.records[monthKey].some(x=>
