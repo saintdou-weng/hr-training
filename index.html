@@ -2300,15 +2300,29 @@ async function syncFromGAS(){
   loading(false);updSyncBadge();updStorInfo();
 }
 async function testGAS(){
-  const {gasUrl}=getCfg();if(!gasUrl){toast('請先填入 GAS URL','err');return;}
+  const {gasUrl}=getCfg();
+
+  if(!gasUrl){
+    toast('請先填入 GAS URL','err');
+    return;
+  }
+
   loading(true);
+
   try{
-    const res=await gasFetch(gasUrl+'?action=ping');
-    const d=await res.json();
-    if(d.pong) toast('連線成功 ✓  v'+(d.version||'1.0')+' | '+new Date(d.time||'').toLocaleTimeString(),'ok');
-    else toast('GAS 回應格式異常：'+JSON.stringify(d),'warn');
-  }catch(e){toast('連線失敗：'+e.message,'err');}
-  catch(e){toast('無法連線：'+e.message,'err');}
+    const res = await gasFetch(gasUrl + '?action=ping');
+    const d = await res.json();
+
+    if(d.pong){
+      toast('連線成功 ✓','ok');
+    }else{
+      toast('GAS 回應格式異常','warn');
+    }
+
+  }catch(e){
+    toast('連線失敗：' + e.message,'err');
+  }
+
   loading(false);
 }
 
