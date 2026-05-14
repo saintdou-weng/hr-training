@@ -2180,6 +2180,28 @@ function doPrint(target){
   setTimeout(()=>{window.print();setTimeout(()=>{goTab(prev);},400);},200);
 }
 
+
+// ── GAS fetch helper: fixes iOS/mobile CORS + timeout ────────────
+async function gasFetch(url, opts={}, timeoutMs=18000){
+  const ctrl=new AbortController();
+  const timer=setTimeout(()=>ctrl.abort(),timeoutMs);
+  try{
+    const defaults={credentials:'omit',signal:ctrl.signal};
+    const res=await fetch(url,{...defaults,...opts});
+    clearTimeout(timer);
+    // GAS may return text/html on error — check Content-Type
+    const ct=res.headers.get('content-type')||'';
+    if(!ct.includes('json'))
+      throw new Error('GAS returned non-JSON (possibly an auth redirect or script error)');
+    return res;
+  }catch(e){
+    clearTimeout(timer);
+    if(e.name==='AbortError') throw new Error('連線逾時（超過 '+Math.round(timeoutMs/1000)+'秒）');
+    throw e;
+  }
+}
+// ── End GAS fetch helper ──────────────────────────────────────────
+
 // =====================================================
 //  GAS SYNC
 // =====================================================
@@ -2191,7 +2213,7 @@ async function syncToGAS(){
   loading(true);
   try{
     const payload={action:'saveAll',trainings:S.trainings,records:S.records,library:S.library};
-    const res=await fetch(gasUrl,{method:'POST',body:JSON.stringify(payload),headers:{'Content-Type':'text/plain'}});
+    const res=await gasFetch(gasUrl,{method:'POST',body:JSON.stringify(payload),headers:{'Content-Type':'text/plain'}});
     const d=await res.json();
     if(d.status==='ok'){
       const ts=new Date().toLocaleString('zh-TW',{hour12:false}).slice(0,16);
@@ -2211,21 +2233,32 @@ async function syncFromGAS(){
   if(txt) txt.textContent=LANG==='en'?'Downloading…':'下載中…';
   loading(true);
   try{
-    const res=await fetch(gasUrl+'?action=getAll');
+    const res=await gasFetch(gasUrl+'?action=getAll');
     const d=await res.json();
     if(d.error) throw new Error(d.error);
     // Trainings: take remote if non-empty
     if(d.trainings&&d.trainings.length>0) S.trainings=d.trainings;
     // Records: MERGE with month-key normalisation (fixes Sheets date-format bug)
     if(d.records){
+      // Normalise any month key format → "YYYY-MM"
+      // Handles: "2026-03" / "2026-3" / Date-stringified "Mon Jan 01 2026 00:00:00 GMT..."
       const normKey=k=>{
         if(!k) return null;
         const s=String(k).trim();
-        if(/^\d{4}-\d{2}$/.test(s)) return s;          // already "2026-03"
+        // Already correct
+        if(/^\d{4}-\d{2}$/.test(s)) return s;
+        // Missing zero-pad: "2026-3"
         const zp=s.match(/^(\d{4})-(\d)$/);
-        if(zp) return `${zp[1]}-0${zp[2]}`;            // "2026-3" → "2026-03"
-        const dt=s.match(/(\d{4})[^\d](\d{1,2})/);
-        if(dt) return `${dt[1]}-${dt[2].padStart(2,'0')}`; // date string fallback
+        if(zp) return `${zp[1]}-0${zp[2]}`;
+        // Try Date parse — handles "Mon Jan 01 2026...", "2026-01-01", etc.
+        try{
+          const d=new Date(s);
+          if(!isNaN(d.getTime())){
+            const y=d.getFullYear(), mo=d.getMonth()+1;
+            if(y>=2020&&y<=2035&&mo>=1&&mo<=12)
+              return `${y}-${String(mo).padStart(2,'0')}`;
+          }
+        }catch(_){}
         return null;
       };
       Object.keys(d.records).forEach(rawKey=>{
@@ -2269,7 +2302,12 @@ async function syncFromGAS(){
 async function testGAS(){
   const {gasUrl}=getCfg();if(!gasUrl){toast('請先填入 GAS URL','err');return;}
   loading(true);
-  try{const res=await fetch(gasUrl+'?action=ping');const d=await res.json();if(d.pong) toast('連線成功 ✓ v'+(d.version||'1.0'),'ok');else toast('GAS 回應異常','warn');}
+  try{
+    const res=await gasFetch(gasUrl+'?action=ping');
+    const d=await res.json();
+    if(d.pong) toast('連線成功 ✓  v'+(d.version||'1.0')+' | '+new Date(d.time||'').toLocaleTimeString(),'ok');
+    else toast('GAS 回應格式異常：'+JSON.stringify(d),'warn');
+  }catch(e){toast('連線失敗：'+e.message,'err');}
   catch(e){toast('無法連線：'+e.message,'err');}
   loading(false);
 }
@@ -2329,9 +2367,14 @@ function sendTgSummary(){
     cancelledItems:cancelledItems.map(t=>t.nameZH+(t.nameEN?' / '+t.nameEN:''))
   };
   loading(true);
-  fetch(gasUrl,{method:'POST',body:JSON.stringify(payload),headers:{'Content-Type':'text/plain'}})
+  gasFetch(gasUrl,{method:'POST',body:JSON.stringify(payload),headers:{'Content-Type':'text/plain'}})
     .then(r=>r.json())
-    .then(d=>{loading(false);if(d.status==='ok') toast(str('toast.tg.ok'),'ok');else toast(str('toast.tg.err')+(d.msg||d.error||''),'err');})
+    .then(d=>{
+      loading(false);
+      if(d.status==='ok') toast(str('toast.tg.ok'),'ok');
+      else toast(str('toast.tg.err')+(d.msg||d.error||''),'err');
+      updSyncBadge();
+    })
     .catch(e=>{loading(false);toast(str('toast.tg.err')+e.message,'err');});
 }
 
